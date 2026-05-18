@@ -1,297 +1,123 @@
-﻿import random
-import sys
-import threading
-import time
-import tkinter as tk
-
+﻿import random, sys, threading, time, tkinter as tk
 try:
-    if sys.platform == "win32":
-        import winsound
-    else:
-        winsound = None
+    winsound = __import__('winsound') if sys.platform == "win32" else None
 except ImportError:
     winsound = None
-
-# Optional advanced audio (synthesized violin) using numpy + simpleaudio
 try:
     import numpy as np
     import simpleaudio as sa
     _SA_AVAILABLE = True
 except Exception:
-    np = None
-    sa = None
+    np = sa = None
     _SA_AVAILABLE = False
 
+CONFIG = {
+    'colors': {'bg': "#e8f2ff", 'header': "#3a64b5", 'white': "#ffffff", 'canvas': "#d9ecff", 'game_bg': "#eef7ff", 'button': "#fff7d5", 'button_hover': "#ffe79a", 'success': "#9df29f", 'error': "#ffb3b3"},
+    'fonts': {'title': ("Comic Sans MS", 24, "bold"), 'label': ("Comic Sans MS", 18, "bold"), 'text': ("Comic Sans MS", 14), 'small': ("Comic Sans MS", 12)},
+    'sounds': {'correct': [660, 825, 990], 'wrong': [220, 330], 'missed': [196, 147], 'finish': [880, 660, 440], 'start': [440, 550, 660]},
+    'total_q': 10, 'canvas_w': 540, 'canvas_h': 350, 'option_deltas': [-12, -9, -6, -4, -3, 3, 4, 6, 9, 12]
+}
 
 class KidsNumberMatchGame(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Number Float Adventure")
-        self.configure(bg="#e8f2ff")
+        self.configure(bg=CONFIG['colors']['bg'])
         self.geometry("580x860")
         self.resizable(False, False)
-
-        self.current_question = 0
-        self.score = 0
-        self.target_number = 0
-        self.correct_index = 0
-        self.is_playing = False
-        self.animation_after_id = None
-        self.cloud_animation_id = None
-        self.floating_y = 0
-        self.total_questions = 10
-        self.progress_dots = []
-        self.cloud_items = []
-        self.music_active = False
-        self._music_thread = None
-        self._music_stop_event = None
-        self._music_play_obj = None
+        self.current_question = self.score = self.target_number = self.correct_index = self.floating_y = 0
+        self.is_playing = self.music_active = False
+        self.animation_after_id = self.cloud_animation_id = None
+        self.total_questions = CONFIG['total_q']
+        self.progress_dots = self.cloud_items = []
+        self._music_thread = self._music_stop_event = self._music_play_obj = None
         self._sa_available = _SA_AVAILABLE
-
         self.setup_ui()
         self.reset_game()
 
+    def create_label(self, parent, text, bg, fg, font, **kwargs):
+        return tk.Label(parent, text=text, bg=bg, fg=fg, font=font, **kwargs)
+
+    def create_button(self, parent, text, bg, command=None, **kwargs):
+        return tk.Button(parent, text=text, bg=bg, fg="white", font=CONFIG['fonts']['label'], command=command, **kwargs)
+
     def setup_ui(self):
-        header_frame = tk.Frame(self, bg="#3a64b5", height=80)
-        header_frame.pack(fill="x")
+        hf = tk.Frame(self, bg=CONFIG['colors']['header'], height=80)
+        hf.pack(fill="x")
+        self.create_label(hf, "Number Float Adventure", CONFIG['colors']['header'], "white", CONFIG['fonts']['title'], pady=16).pack(side="left", padx=20)
+        self.create_label(hf, "Level 1", "#ffe58f", "#3e3a30", CONFIG['fonts']['text'], padx=14, pady=10, bd=2, relief="ridge").pack(side="right", padx=20, pady=12)
 
-        title_label = tk.Label(
-            header_frame,
-            text="Number Float Adventure",
-            bg="#3a64b5",
-            fg="white",
-            font=("Comic Sans MS", 24, "bold"),
-            pady=16,
-        )
-        title_label.pack(side="left", padx=20)
-
-        badge_label = tk.Label(
-            header_frame,
-            text="Level 1",
-            bg="#ffe58f",
-            fg="#3e3a30",
-            font=("Comic Sans MS", 14, "bold"),
-            padx=14,
-            pady=10,
-            bd=2,
-            relief="ridge",
-        )
-        badge_label.pack(side="right", padx=20, pady=12)
-
-        self.start_screen_frame = tk.Frame(self, bg="#eef7ff")
+        self.start_screen_frame = tk.Frame(self, bg=CONFIG['colors']['game_bg'])
         self.start_screen_frame.pack(fill="both", expand=True)
-
-        self.start_card = tk.Frame(
-            self.start_screen_frame,
-            bg="#ffffff",
-            bd=6,
-            relief="ridge",
-        )
+        self.start_card = tk.Frame(self.start_screen_frame, bg=CONFIG['colors']['white'], bd=6, relief="ridge")
         self.start_card.place(relx=0.5, rely=0.5, anchor="center", width=520, height=520)
 
-        self.start_title = tk.Label(
-            self.start_card,
-            text="🧠 Ready for a Number Adventure?",
-            bg="#ffffff",
-            fg="#2f3e79",
-            font=("Comic Sans MS", 22, "bold"),
-            wraplength=460,
-            justify="center",
-        )
+        self.start_title = self.create_label(self.start_card, "🧠 Ready for a Number Adventure?", CONFIG['colors']['white'], "#2f3e79", CONFIG['fonts']['title'], wraplength=460, justify="center")
         self.start_title.pack(pady=(40, 16))
-
-        self.start_desc = tk.Label(
-            self.start_card,
-            text="Watch the number float up and tap the right answer before it disappears!",
-            bg="#ffffff",
-            fg="#515f8a",
-            font=("Comic Sans MS", 14),
-            wraplength=460,
-            justify="center",
-        )
+        self.start_desc = self.create_label(self.start_card, "Watch the number float up and tap the right answer before it disappears!", CONFIG['colors']['white'], "#515f8a", CONFIG['fonts']['text'], wraplength=460, justify="center")
         self.start_desc.pack(pady=(0, 28))
-
-        self.start_button = tk.Button(
-            self.start_card,
-            text="Start Game",
-            bg="#ff7f3f",
-            fg="white",
-            font=("Comic Sans MS", 18, "bold"),
-            bd=0,
-            relief="raised",
-            activebackground="#ff9b6a",
-            activeforeground="white",
-            command=self.start_game,
-        )
+        self.start_button = self.create_button(self.start_card, "Start Game", "#ff7f3f", self.start_game, bd=0, relief="raised", activebackground="#ff9b6a", font=("Comic Sans MS", 18, "bold"))
         self.start_button.pack(pady=(0, 28), ipadx=12, ipady=8)
+        self.create_label(self.start_card, "10 questions · Only correct answers count", CONFIG['colors']['white'], "#5c6b89", CONFIG['fonts']['small']).pack()
 
-        self.start_tip = tk.Label(
-            self.start_card,
-            text="10 questions · Only correct answers count",
-            bg="#ffffff",
-            fg="#5c6b89",
-            font=("Comic Sans MS", 12),
-        )
-        self.start_tip.pack()
-
-        self.game_frame = tk.Frame(self, bg="#eef7ff")
-
-        self.canvas = tk.Canvas(
-            self.game_frame,
-            width=540,
-            height=350,
-            bg="#d9ecff",
-            bd=0,
-            highlightthickness=4,
-            highlightbackground="#9dc6ff",
-            relief="ridge",
-        )
+        self.game_frame = tk.Frame(self, bg=CONFIG['colors']['game_bg'])
+        self.canvas = tk.Canvas(self.game_frame, width=CONFIG['canvas_w'], height=CONFIG['canvas_h'], bg=CONFIG['colors']['canvas'], bd=0, highlightthickness=4, highlightbackground="#9dc6ff", relief="ridge")
         self.canvas.pack(pady=(18, 4))
-
         self.draw_background_decorations()
 
-        self.progress_frame = tk.Frame(self.game_frame, bg="#eef7ff")
-        self.progress_frame.pack(fill="x", padx=18, pady=(0, 10))
-
-        self.question_label = tk.Label(
-            self.progress_frame,
-            text="Question 0 / 10",
-            bg="#eef7ff",
-            fg="#35377b",
-            font=("Comic Sans MS", 18, "bold"),
-        )
+        pf = tk.Frame(self.game_frame, bg=CONFIG['colors']['game_bg'])
+        pf.pack(fill="x", padx=18, pady=(0, 10))
+        self.question_label = self.create_label(pf, "Question 0 / 10", CONFIG['colors']['game_bg'], "#35377b", CONFIG['fonts']['label'])
         self.question_label.pack(side="left")
-
-        self.score_label = tk.Label(
-            self.progress_frame,
-            text="Score: 0",
-            bg="#eef7ff",
-            fg="#1a6f4e",
-            font=("Comic Sans MS", 18, "bold"),
-        )
+        self.score_label = self.create_label(pf, "Score: 0", CONFIG['colors']['game_bg'], "#1a6f4e", CONFIG['fonts']['label'])
         self.score_label.pack(side="right")
 
-        self.progress_dots_frame = tk.Frame(self.game_frame, bg="#eef7ff")
+        self.progress_dots_frame = tk.Frame(self.game_frame, bg=CONFIG['colors']['game_bg'])
         self.progress_dots_frame.pack(fill="x", padx=18, pady=(0, 10))
 
-        self.answer_frame = tk.Frame(self.game_frame, bg="#eef7ff")
-        self.answer_frame.pack(pady=10)
-
+        af = tk.Frame(self.game_frame, bg=CONFIG['colors']['game_bg'])
+        af.pack(pady=10)
         self.option_buttons = []
         for idx in range(4):
-            button = tk.Button(
-                self.answer_frame,
-                text="",
-                width=14,
-                height=2,
-                bg="#fff7d5",
-                fg="#2d2f4f",
-                activebackground="#ffd768",
-                activeforeground="#2d2f4f",
-                font=("Comic Sans MS", 16, "bold"),
-                relief="raised",
-                bd=4,
-                command=lambda index=idx: self.check_answer(index),
-                state="disabled",
-            )
-            button.grid(row=idx // 2, column=idx % 2, padx=14, pady=12)
-            button.bind("<Enter>", lambda event, btn=button: btn.config(bg="#ffe79a"))
-            button.bind("<Leave>", lambda event, btn=button: btn.config(bg="#fff7d5"))
-            self.option_buttons.append(button)
+            btn = tk.Button(af, text="", width=14, height=2, bg=CONFIG['colors']['button'], fg="#2d2f4f", activebackground="#ffd768", activeforeground="#2d2f4f", font=("Comic Sans MS", 16, "bold"), relief="raised", bd=4, command=lambda index=idx: self.check_answer(index), state="disabled")
+            btn.grid(row=idx // 2, column=idx % 2, padx=14, pady=12)
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=CONFIG['colors']['button_hover']))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg=CONFIG['colors']['button']))
+            self.option_buttons.append(btn)
 
-        self.status_label = tk.Label(
-            self.game_frame,
-            text="Press START to begin your adventure!",
-            bg="#eef7ff",
-            fg="#4a5c82",
-            font=("Comic Sans MS", 14),
-            wraplength=520,
-            justify="center",
-            pady=10,
-        )
+        self.status_label = self.create_label(self.game_frame, "Press START to begin your adventure!", CONFIG['colors']['game_bg'], "#4a5c82", CONFIG['fonts']['text'], wraplength=520, justify="center", pady=10)
         self.status_label.pack(pady=(6, 10))
 
-        self.tip_card = tk.Frame(self.game_frame, bg="#ffffff", bd=5, relief="ridge")
-        self.tip_card.pack(fill="x", padx=18, pady=(0, 18))
-
-        self.tip_text = tk.Label(
-            self.tip_card,
-            text="Watch the floating number carefully and choose the correct answer before it escapes!",
-            bg="#ffffff",
-            fg="#556582",
-            font=("Comic Sans MS", 12),
-            wraplength=500,
-            justify="center",
-            pady=12,
-        )
-        self.tip_text.pack(padx=12)
+        tc = tk.Frame(self.game_frame, bg=CONFIG['colors']['white'], bd=5, relief="ridge")
+        tc.pack(fill="x", padx=18, pady=(0, 18))
+        self.create_label(tc, "Watch the floating number carefully and choose the correct answer before it escapes!", CONFIG['colors']['white'], "#556582", CONFIG['fonts']['small'], wraplength=500, justify="center", pady=12).pack(padx=12)
 
     def draw_background_decorations(self):
         self.cloud_items = []
         self.canvas.delete("decor")
-        self.canvas.create_rectangle(0, 0, 540, 350, fill="#d9ecff", outline="", tags="decor")
-
+        self.canvas.create_rectangle(0, 0, CONFIG['canvas_w'], CONFIG['canvas_h'], fill=CONFIG['colors']['canvas'], outline="", tags="decor")
         for _ in range(10):
-            x = random.randint(20, 520)
-            y = random.randint(20, 300)
-            size = random.randint(22, 60)
-            self.canvas.create_oval(
-                x,
-                y,
-                x + size,
-                y + size,
-                fill=random.choice(["#fff1a0", "#c6eeff", "#ffbce5", "#c3ffc9"]),
-                outline="",
-                tags="decor",
-            )
-
+            x, y, sz = random.randint(20, 520), random.randint(20, 300), random.randint(22, 60)
+            self.canvas.create_oval(x, y, x + sz, y + sz, fill=random.choice(["#fff1a0", "#c6eeff", "#ffbce5", "#c3ffc9"]), outline="", tags="decor")
         for _ in range(7):
-            x = random.randint(40, 500)
-            y = random.randint(30, 280)
-            self.canvas.create_text(
-                x,
-                y,
-                text=random.choice(["⭐", "✨", "🌟"]),
-                font=("Segoe UI Emoji", random.randint(18, 32)),
-                fill=random.choice(["#f49e42", "#8c4dff", "#4db8ff"]),
-                tags="decor",
-            )
-
-        cloud_positions = [(70, 70), (360, 40), (200, 120)]
-        for x, y in cloud_positions:
-            cloud = self.canvas.create_oval(x, y, x + 120, y + 60, fill="#ffffff", outline="", tags="decor")
-            cloud2 = self.canvas.create_oval(x + 20, y - 20, x + 130, y + 50, fill="#ffffff", outline="", tags="decor")
-            self.cloud_items.extend([cloud, cloud2])
-
-        self.canvas.create_text(
-            270,
-            170,
-            text="🎈",
-            font=("Segoe UI Emoji", 56),
-            fill="#7d5cff",
-            tags="decor",
-        )
+            self.canvas.create_text(random.randint(40, 500), random.randint(30, 280), text=random.choice(["⭐", "✨", "🌟"]), font=("Segoe UI Emoji", random.randint(18, 32)), fill=random.choice(["#f49e42", "#8c4dff", "#4db8ff"]), tags="decor")
+        for x, y in [(70, 70), (360, 40), (200, 120)]:
+            self.cloud_items.extend([self.canvas.create_oval(x, y, x + 120, y + 60, fill=CONFIG['colors']['white'], outline="", tags="decor"), 
+                                      self.canvas.create_oval(x + 20, y - 20, x + 130, y + 50, fill=CONFIG['colors']['white'], outline="", tags="decor")])
+        self.canvas.create_text(270, 170, text="🎈", font=("Segoe UI Emoji", 56), fill="#7d5cff", tags="decor")
 
     def draw_progress_dots(self):
-        for widget in self.progress_dots_frame.winfo_children():
-            widget.destroy()
+        for w in self.progress_dots_frame.winfo_children():
+            w.destroy()
         self.progress_dots = []
         for _ in range(self.total_questions):
-            dot_canvas = tk.Canvas(
-                self.progress_dots_frame,
-                width=26,
-                height=26,
-                bg="#eef7ff",
-                highlightthickness=0,
-            )
-            dot_canvas.pack(side="left", padx=2)
-            oval = dot_canvas.create_oval(4, 4, 22, 22, fill="#cbd6ff", outline="#aac0ff")
-            self.progress_dots.append((dot_canvas, oval))
+            dc = tk.Canvas(self.progress_dots_frame, width=26, height=26, bg=CONFIG['colors']['game_bg'], highlightthickness=0)
+            dc.pack(side="left", padx=2)
+            self.progress_dots.append((dc, dc.create_oval(4, 4, 22, 22, fill="#cbd6ff", outline="#aac0ff")))
 
     def update_progress_dots(self):
-        for idx, (dot_canvas, oval) in enumerate(self.progress_dots):
-            color = "#6d8cff" if idx < self.current_question else "#cbd6ff"
-            dot_canvas.itemconfig(oval, fill=color)
+        for idx, (dc, oval) in enumerate(self.progress_dots):
+            dc.itemconfig(oval, fill="#6d8cff" if idx < self.current_question else "#cbd6ff")
 
     def animate_clouds(self):
         if not self.is_playing:
@@ -377,13 +203,12 @@ class KidsNumberMatchGame(tk.Tk):
     def generate_options(self, target):
         choices = {target}
         while len(choices) < 4:
-            delta = random.choice([-12, -9, -6, -4, -3, 3, 4, 6, 9, 12])
-            value = target + delta
-            if 1 <= value <= 99:
-                choices.add(value)
-        options = list(choices)
-        random.shuffle(options)
-        return options
+            val = target + random.choice(CONFIG['option_deltas'])
+            if 1 <= val <= 99:
+                choices.add(val)
+        opts = list(choices)
+        random.shuffle(opts)
+        return opts
 
     def animate_number(self):
         self.canvas.delete("float")
@@ -440,29 +265,15 @@ class KidsNumberMatchGame(tk.Tk):
         self.status_label.config(text="Oops! The number floated away. Don't worry, next one!", fg="#d2691e")
         self.after(900, self.next_question)
 
-    def game_over(self, message):
-        self.cancel_animation()
-        self.is_playing = False
-        self.enable_answer_buttons(False)
-        self.start_title.config(text=message)
-        self.start_desc.config(text=f"Your score: {self.score} / {self.total_questions}\nTap START to play again.")
-        self.start_button.config(state="normal", text="Play Again")
-        self.show_start_screen()
-
     def end_game(self):
         self.cancel_animation()
-        self.is_playing = False
+        self.is_playing = self.music_active = False
         self.enable_answer_buttons(False)
         self.stop_background_music()
         self.play_sound("finish")
-        if self.score == self.total_questions:
-            message = "🎉 Congratulations! Perfect score! 🎉"
-        elif self.score >= 6:
-            message = "Awesome! You passed with great marks."
-        else:
-            message = "Keep practicing! You can score higher next time."
-
-        self.start_title.config(text=message)
+        msgs = {self.total_questions: "🎉 Congratulations! Perfect score! 🎉", 6: "Awesome! You passed with great marks."}
+        msg = msgs.get(self.score if self.score == self.total_questions else (6 if self.score >= 6 else 0), "Keep practicing! You can score higher next time.")
+        self.start_title.config(text=msg)
         self.start_desc.config(text=f"Final score: {self.score} / {self.total_questions}\nTap START to play again.")
         self.start_button.config(state="normal", text="Play Again")
         self.show_start_screen()
@@ -592,36 +403,19 @@ class KidsNumberMatchGame(tk.Tk):
             pass
 
     def play_sound(self, sound_type: str):
-        # Use synthesized sounds when available
-        if self._sa_available and np is not None and sa is not None:
+        durations = {'correct': 0.45, 'wrong': 0.45, 'missed': 0.55, 'finish': 0.9, 'start': 0.6}
+        if self._sa_available and np and sa:
             try:
-                if sound_type == "correct":
-                    # Bright major chord
-                    self._play_short_tone([660, 825, 990], duration=0.45)
-                elif sound_type == "wrong":
-                    # Dissonant short tone
-                    self._play_short_tone([220, 330], duration=0.45)
-                elif sound_type == "missed":
-                    self._play_short_tone([196, 147], duration=0.55)
-                elif sound_type == "finish":
-                    self._play_short_tone([880, 660, 440], duration=0.9)
-                elif sound_type == "start":
-                    self._play_short_tone([440, 550, 660], duration=0.6)
+                if sound_type in CONFIG['sounds']:
+                    self._play_short_tone(CONFIG['sounds'][sound_type], duration=durations.get(sound_type, 0.45))
             except Exception:
                 pass
             return
-
-        # Fallback to winsound beeps if available
         if not winsound:
             return
-        if sound_type == "correct":
-            winsound.MessageBeep(winsound.MB_OK)
-        elif sound_type == "wrong":
-            winsound.MessageBeep(winsound.MB_ICONHAND)
-        elif sound_type == "missed":
-            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-        elif sound_type == "finish":
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        beep_map = {'correct': winsound.MB_OK, 'wrong': winsound.MB_ICONHAND, 'missed': winsound.MB_ICONEXCLAMATION, 'finish': winsound.MB_ICONASTERISK}
+        if sound_type in beep_map:
+            winsound.MessageBeep(beep_map[sound_type])
         elif sound_type == "start":
             try:
                 winsound.PlaySound("SystemStart", winsound.SND_ALIAS | winsound.SND_ASYNC)
