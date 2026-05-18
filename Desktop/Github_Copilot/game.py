@@ -39,7 +39,8 @@ class KidsNumberMatchGame(tk.Tk):
         return tk.Label(parent, text=text, bg=bg, fg=fg, font=font, **kwargs)
 
     def create_button(self, parent, text, bg, command=None, **kwargs):
-        return tk.Button(parent, text=text, bg=bg, fg="white", font=CONFIG['fonts']['label'], command=command, **kwargs)
+        font = kwargs.pop('font', CONFIG['fonts']['label'])
+        return tk.Button(parent, text=text, bg=bg, fg="white", font=font, command=command, **kwargs)
 
     def setup_ui(self):
         hf = tk.Frame(self, bg=CONFIG['colors']['header'], height=80)
